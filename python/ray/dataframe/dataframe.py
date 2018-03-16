@@ -3132,6 +3132,7 @@ class DataFrame(object):
                                    self._col_partitions)
 
         return DataFrame(columns=self.columns,
+                         index=self.index,
                          row_partitions=new_rows,
                          col_partitions=new_cols)
 
