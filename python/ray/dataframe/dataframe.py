@@ -2399,6 +2399,7 @@ class DataFrame(object):
                                                        **kwargs),
                                    self._col_partitions)
         return DataFrame(columns=self.columns,
+                         index=self.index,
                          row_partitions=new_rows,
                          col_partitions=new_cols)
 
@@ -2868,10 +2869,12 @@ class DataFrame(object):
         Returns:
             A Pandas Series representing the value for the column.
         """
-        return # TODO: Fix this
-        result_column_chunks = self._map_partitions(
-            lambda df: df.__getitem__(key))
-        return to_pandas(result_column_chunks)
+        partition_id = self.get_col_partition(key)
+        index = self.get_col_index_within_partition(key)
+        res = ray.get(_deploy_func.remote(lambda df: df.__getitem__(index),
+                                          self._col_partitions[partition_id]))
+        res.name = key
+        return res
 
     def __setitem__(self, key, value):
         raise NotImplementedError(
