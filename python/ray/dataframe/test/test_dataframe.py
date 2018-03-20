@@ -1919,7 +1919,6 @@ def test_quantile():
 
 @pytest.fixture
 def test_query(ray_df, pandas_df, funcs):
-    return
     for f in funcs:
         pandas_df_new, ray_df_new = pandas_df.query(f), ray_df.query(f)
         assert pandas_df_new.equals(to_pandas(ray_df_new))
