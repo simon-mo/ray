@@ -120,24 +120,24 @@ def _partition_pandas_dataframe(df, num_partitions=None, row_chunksize=None,
         temp_df.columns = pd.RangeIndex(0, len(temp_df.columns))
         row_partitions.append(ray.put(temp_df))
 
-    temp_df = df
+    # temp_df = df
+    #
+    # col_partitions = []
+    # while len(temp_df.columns) > col_chunksize:
+    #     t_df = temp_df.iloc[:, 0:col_chunksize]
+    #     # reset_index here because we want a pd.RangeIndex
+    #     # within the partitions. It is smaller and sometimes faster.
+    #     t_df.reset_index(drop=True, inplace=True)
+    #     t_df.columns = pd.RangeIndex(0, len(t_df.columns))
+    #     top = ray.put(t_df)
+    #     col_partitions.append(top)
+    #     temp_df = temp_df.iloc[:, col_chunksize:]
+    # else:
+    #     temp_df.reset_index(drop=True, inplace=True)
+    #     temp_df.columns = pd.RangeIndex(0, len(temp_df.columns))
+    #     col_partitions.append(ray.put(temp_df))
 
-    col_partitions = []
-    while len(temp_df.columns) > col_chunksize:
-        t_df = temp_df.iloc[:, 0:col_chunksize]
-        # reset_index here because we want a pd.RangeIndex
-        # within the partitions. It is smaller and sometimes faster.
-        t_df.reset_index(drop=True, inplace=True)
-        t_df.columns = pd.RangeIndex(0, len(t_df.columns))
-        top = ray.put(t_df)
-        col_partitions.append(top)
-        temp_df = temp_df.iloc[:, col_chunksize:]
-    else:
-        temp_df.reset_index(drop=True, inplace=True)
-        temp_df.columns = pd.RangeIndex(0, len(temp_df.columns))
-        col_partitions.append(ray.put(temp_df))
-
-    return row_partitions, col_partitions
+    return row_partitions
 
 
 def from_pandas(df, num_partitions=None, chunksize=None):
@@ -152,11 +152,10 @@ def from_pandas(df, num_partitions=None, chunksize=None):
     """
     from .dataframe import DataFrame
 
-    row_partitions, col_partitions = \
+    row_partitions = \
         _partition_pandas_dataframe(df, num_partitions, chunksize)
 
     return DataFrame(row_partitions=row_partitions,
-                     col_partitions=col_partitions,
                      columns=df.columns,
                      index=df.index)
 
@@ -168,7 +167,11 @@ def to_pandas(df):
     Returns:
         A new pandas DataFrame.
     """
-    pd_df = pd.concat(ray.get(df._row_partitions))
+    if df._row_partitions is not None:
+        pd_df = pd.concat(ray.get(df._row_partitions))
+    else:
+        pd_df = pd.concat(ray.get(df._col_partitions),
+                          axis=1)
     pd_df.index = df.index
     pd_df.columns = df.columns
     return pd_df
@@ -226,8 +229,11 @@ def _rebuild_rows(col_partitions, index, columns):
     """
     n_rows = min(max(get_npartitions(), len(col_partitions)), len(index))
     partition_assignments = assign_partitions.remote(index, n_rows)
-    shufflers = [ShuffleActor.remote(x, partition_axis=1, shuffle_axis=0)
-                 for x in col_partitions]
+    shufflers = [ShuffleActor.remote(
+        col_partitions[i] if i < len(col_partitions) else pd.DataFrame(),
+        partition_axis=1,
+        shuffle_axis=0)
+                 for i in range(n_rows)]
 
     shufflers_done = \
         [shufflers[i].shuffle.remote(
@@ -288,9 +294,15 @@ def _map_partitions(func, partitions, *argslists):
     Returns:
         A new Dataframe containing the result of the function
     """
+    if partitions is None:
+        return None
+
     assert(callable(func))
     if argslists is None:
         return [_deploy_func.remote(func, part) for part in partitions]
+    elif len(argslists) == 1:
+        return [_deploy_func.remote(func, part, argslists[0])
+                for part in partitions]
     else:
         assert(all([len(args) == len(partitions) for args in argslists]))
         return [_deploy_func.remote(func, part, *args) for part, *args in zip(partitions, *argslists)]
