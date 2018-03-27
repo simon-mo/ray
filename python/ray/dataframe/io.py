@@ -7,76 +7,79 @@ from io import BytesIO
 import os
 import re
 
-from pyarrow.parquet import ParquetFile
 import pandas as pd
 
-from .dataframe import ray, DataFrame
 from . import get_npartitions
+from .dataframe import ray, DataFrame
+from .utils import _partition_pandas_dataframe
 
 
 # Parquet
+def _get_parquet_dataset_from_path(path):
+    import pyarrow.parquet as pq
+
+    if path.startswith('s3://'):
+        import s3fs
+        s3 = s3fs.S3FileSystem()
+        p = pq.ParquetDataset(path.replace('s3://', ''), filesystem=s3)
+    else:
+        p = pq.ParquetDataset(path)
+
+    return p
+
+
 def read_parquet(path, engine='auto', columns=None, **kwargs):
     """Load a parquet object from the file path, returning a DataFrame.
     Ray DataFrame only supports pyarrow engine for now.
 
     Args:
         path: The filepath of the parquet file.
-              We only support local files for now.
+            We currently supports:
+            - Local path
+            - s3
         engine: Ray only support pyarrow reader.
                 This argument doesn't do anything for now.
-        kwargs: Pass into parquet's read_row_group function.
+        kwargs: Pass into parquet's read function.
     """
-    pf = ParquetFile(path)
+    p = _get_parquet_dataset_from_path(path)
 
-    n_rows = pf.metadata.num_rows
-    chunksize = n_rows // get_npartitions()
-    n_row_groups = pf.metadata.num_row_groups
+    if not columns:
+        idx_regex = re.compile('__index_level_\d+__')
+        columns = [
+            name for name in p.schema.names if not idx_regex.match(name)
+        ]
 
-    idx_regex = re.compile('__index_level_\d+__')
+    column_obj_ids = [
+        read_parquet_column.remote(path, [col], kwargs) for col in columns
+    ]
+    block_ids = ray.get(column_obj_ids)
+
+    # Each block will have RangeIndex index and RangeIndex column
+    # Block_ids will be column major.
+    # See block_to_pd_df function below for more explaination.
+    return block_ids
+
+
+def block_to_pd_df(blocks):
+    """
+    Assume columns major blocks as list of lists. 
+        blocks = [col_1_list, col_2_list, ...]
+        col_1_list = [ObjectID(col_1_row_partition_1), ...]
+    """
     columns = [
-        name for name in pf.metadata.schema.names if not idx_regex.match(name)
+        pd.concat(ray.get(blocks[i])).reset_index(drop=True)
+        for i in range(len(blocks))
     ]
-
-    df_from_row_groups = [
-        _read_parquet_row_group.remote(path, columns, i, kwargs)
-        for i in range(n_row_groups)
-    ]
-    splited_dfs = ray.get(
-        [_split_df.remote(df, chunksize) for df in df_from_row_groups])
-    df_remotes = list(chain.from_iterable(splited_dfs))
-
-    return DataFrame(row_partitions=df_remotes, columns=columns)
+    return pd.concat(columns, axis=1)
 
 
 @ray.remote
-def _read_parquet_row_group(path, columns, row_group_id, kwargs={}):
-    """Read a parquet row_group given file_path.
-    """
-    pf = ParquetFile(path)
-    df = pf.read_row_group(row_group_id, columns=columns, **kwargs).to_pandas()
-    return df
+def read_parquet_column(path, columns, kwargs):
+    p = _get_parquet_dataset_from_path(path)
 
-
-@ray.remote
-def _split_df(pd_df, chunksize):
-    """Split a pd_df into partitions.
-
-    Returns:
-        remote_df_ids ([ObjectID])
-    """
-    dataframes = []
-
-    while len(pd_df) > chunksize:
-        t_df = pd_df[:chunksize]
-        t_df.reset_index(drop=True)
-        top = ray.put(t_df)
-        dataframes.append(top)
-        pd_df = pd_df[chunksize:]
-    else:
-        pd_df = pd_df.reset_index(drop=True)
-        dataframes.append(ray.put(pd_df))
-
-    return dataframes
+    full_column = p.read(columns=columns, **kwargs).to_pandas()
+    return _partition_pandas_dataframe(
+        full_column, num_partitions=get_npartitions())
 
 
 # CSV
