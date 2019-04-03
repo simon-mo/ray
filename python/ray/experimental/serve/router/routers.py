@@ -130,6 +130,11 @@ class DeadlineAwareRouter:
         # an extra copy of 'data' in the object store.
         data_object_id = ray.worker.global_worker._current_task.arguments()[1]
 
+        if isinstance(data, list) and \
+                len(data) == 1 and \
+                isinstance(data[0], ray.ObjectID):
+            data_object_id = data[0]
+
         self.query_queues[actor_name].push(
             SingleQuery(data_object_id, result_object_id, deadline_s))
 
