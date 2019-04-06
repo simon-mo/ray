@@ -57,16 +57,13 @@ class HTTPFrontendActor:
 
             inp = data.pop("input")
 
-            result_future = unwrap(
-                self.router.call.remote(actor_name, inp, deadline))
+            result_future = unwrap(self.router.call.remote(actor_name, inp, deadline))
 
             # TODO(simon): change to asyncio ray.get
             result = ray.get(result_future)
 
-            return JSONResponse({
-                "success": True,
-                "actor": actor_name,
-                "result": result
-            })
+            return JSONResponse(
+                {"success": True, "actor": actor_name, "result": result}
+            )
 
         uvicorn.run(default_app, host=self.ip, port=self.port)

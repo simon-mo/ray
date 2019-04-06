@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import traceback
 from typing import List
+import time
 
 import ray
 from ray.experimental.serve import SingleQuery
@@ -46,18 +47,31 @@ class RayServeMixin:
     """
 
     serve_method = "__call__"
+    put_timing_data_instead = False
 
+    @ray.method(num_return_vals=0)
     def _dispatch(self, input_batch: List[SingleQuery]):
         """Helper method to dispatch a batch of input to self.serve_method."""
         method = getattr(self, self.serve_method)
-        if hasattr(method, "ray_serve_batched_input"):
+        is_batched = hasattr(method, "ray_serve_batched_input")
+
+        if self.put_timing_data_instead:
+            assert not is_batched, "Put timing data assumes single input"
+
+        assert len(input_batch) == 1, "Assuming batchsize 1"
+        inp = input_batch[0]
+        data = ray.get(ray.ObjectID.from_binary(inp["data"]))
+        result_object_id = ray.ObjectID.from_binary(inp["result_object_id"])
+
+        if is_batched:
             batch = [inp.data for inp in input_batch]
             result = _execute_and_seal_error(method, batch, self.serve_method)
             for res, inp in zip(result, input_batch):
                 ray.worker.global_worker.put_object(inp.result_object_id, res)
         else:
             for inp in input_batch:
-                result = _execute_and_seal_error(method, inp.data,
-                                                 self.serve_method)
-                ray.worker.global_worker.put_object(inp.result_object_id,
-                                                    result)
+                # We are in this case only
+                result = _execute_and_seal_error(method, data, self.serve_method)
+                if self.put_timing_data_instead:
+                    result = time.time()
+                ray.worker.global_worker.put_object(result_object_id, result)

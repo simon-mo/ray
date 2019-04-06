@@ -28,8 +28,7 @@ def generated_inputs():
     input_arr = np.arange(10)
     for i in input_arr:
         oid = get_new_oid()
-        inputs.append(
-            SingleQuery(data=i, result_object_id=oid, deadline_s=deadline))
+        inputs.append(SingleQuery(data=i, result_object_id=oid, deadline_s=deadline))
     return inputs
 
 
