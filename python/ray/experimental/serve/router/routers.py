@@ -5,6 +5,7 @@ from __future__ import print_function
 from collections import defaultdict
 from functools import total_ordering
 from typing import Callable, Dict, List, Set, Tuple
+import time
 
 import ray
 from ray.experimental.serve.object_id import get_new_oid
@@ -50,7 +51,7 @@ class DeadlineAwareRouter:
     reorder incoming query based on their deadlines.
     """
 
-    def __init__(self, router_name):
+    def __init__(self, router_name, debug=False):
         # Runtime Data
         self.query_queues: Dict[str, PriorityQueue] = defaultdict(FIFOQueue)
         self.running_queries: Dict[ray.ObjectID, ray.actor.ActorHandle] = {}
@@ -61,10 +62,15 @@ class DeadlineAwareRouter:
         self.actor_init_arguments: Dict[str, Tuple[List, Dict]] = {}
         self.max_batch_size: Dict[str, int] = {}
 
+        # map resource_bundle_id -> (actor_name: str, idx_in_lst: int)
+        self.resource_id_to_actors: Dict[int, tuple] = {}
+
         # Router Metadata
         self.name = router_name
         self.handle = None
+        self.debug = debug
 
+    @ray.method(num_return_vals=0)
     def start(self):
         """Kick off the router loop"""
 
@@ -74,6 +80,7 @@ class DeadlineAwareRouter:
         self.handle = ray.experimental.get_actor(self.name)
         self.handle.loop.remote()
 
+    @ray.method(num_return_vals=0)
     def register_actor(
         self,
         actor_name: str,
@@ -89,32 +96,64 @@ class DeadlineAwareRouter:
         self.actor_init_arguments[actor_name] = (init_args, init_kwargs)
         self.max_batch_size[actor_name] = max_batch_size
 
-        ray.experimental.get_actor(self.name).set_replica.remote(
-            actor_name, num_replicas
+        # ray.experimental.get_actor(self.name).set_replica.remote(
+        #     actor_name, num_replicas
+        # )
+
+    # def set_replica(self, actor_name, new_replica_count):
+    #     """Scale a managed actor according to new_replica_count."""
+    #     assert actor_name in self.managed_actors, ACTOR_NOT_REGISTERED_MSG(actor_name)
+
+    #     current_replicas = len(self.actor_handles[actor_name])
+
+    #     # Increase the number of replicas
+    #     if new_replica_count > current_replicas:
+    #         for _ in range(new_replica_count - current_replicas):
+    #             args = self.actor_init_arguments[actor_name][0]
+    #             kwargs = self.actor_init_arguments[actor_name][1]
+    #             new_actor_handle = self.managed_actors[actor_name].remote(
+    #                 *args, **kwargs
+    #             )
+    #             self.actor_handles[actor_name].append(new_actor_handle)
+
+    #     # Decrease the number of replicas
+    #     if new_replica_count < current_replicas:
+    #         for _ in range(current_replicas - new_replica_count):
+    #             # Note actor destructor will be called after all remaining
+    #             # calls finish. Therefore it's safe to call del here.
+    #             del self.actor_handles[actor_name][-1]
+    
+    @ray.method(num_return_vals=0)
+    def add_replica(self, 
+        actor_name, 
+        num_cpus,
+        resource_vector, 
+        resource_bundle_id,
+        init_args=None, 
+        init_kwargs=None
+        ):
+        if init_args == None: 
+            init_args = []
+        if init_kwargs == None: 
+            init_kwargs = dict()
+        
+        init_kwargs.update({'num_cpus': num_cpus})
+        init_kwargs.update({'resources': resource_vector})
+
+        new_actor_handle = self.managed_actors[actor_name].remote(
+            *init_args, **init_kwargs
         )
 
-    def set_replica(self, actor_name, new_replica_count):
-        """Scale a managed actor according to new_replica_count."""
-        assert actor_name in self.managed_actors, ACTOR_NOT_REGISTERED_MSG(actor_name)
+        idx = len(self.actor_handles)
+        self.actor_handles[actor_name].append(new_actor_handle)
+        self.resource_id_to_actors[resource_bundle_id] = (actor_name, idx)
 
-        current_replicas = len(self.actor_handles[actor_name])
-
-        # Increase the number of replicas
-        if new_replica_count > current_replicas:
-            for _ in range(new_replica_count - current_replicas):
-                args = self.actor_init_arguments[actor_name][0]
-                kwargs = self.actor_init_arguments[actor_name][1]
-                new_actor_handle = self.managed_actors[actor_name].remote(
-                    *args, **kwargs
-                )
-                self.actor_handles[actor_name].append(new_actor_handle)
-
-        # Decrease the number of replicas
-        if new_replica_count < current_replicas:
-            for _ in range(current_replicas - new_replica_count):
-                # Note actor destructor will be called after all remaining
-                # calls finish. Therefore it's safe to call del here.
-                del self.actor_handles[actor_name][-1]
+    @ray.method(num_return_vals=0)
+    def remove_replica(self, resource_bundle_id):
+        actor_name, idx = self.resource_id_to_actors.pop(resource_bundle_id)
+        actor_found = self.actor_handles[actor_name].pop(idx)
+        del actor_found
+        
 
     @ray.method(num_return_vals=0)
     def call(self, actor_name, data, result_object_id, deadline_s):
@@ -182,6 +221,9 @@ class DeadlineAwareRouter:
                 self._mark_running(result_oid, actor_handle)
         # 3. Tail recursively schedule itself.
         self.handle.loop.remote()
+
+        if self.debug:
+            time.sleep(0.5)
 
     def _get_next_batch(self, actor_name: str) -> List[dict]:
         """Get next batch of request for the actor whose name is provided."""
