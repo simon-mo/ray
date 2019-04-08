@@ -137,11 +137,11 @@ class DeadlineAwareRouter:
         if init_kwargs == None: 
             init_kwargs = dict()
         
-        init_kwargs.update({'num_cpus': num_cpus})
-        init_kwargs.update({'resources': resource_vector})
-
-        new_actor_handle = self.managed_actors[actor_name].remote(
-            *init_args, **init_kwargs
+        new_actor_handle = self.managed_actors[actor_name]._remote(
+            args=init_args, 
+            kwargs=init_kwargs,
+            num_cpus=num_cpus,
+            resources=resource_vector
         )
 
         idx = len(self.actor_handles)
