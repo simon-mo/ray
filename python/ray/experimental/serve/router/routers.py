@@ -153,10 +153,12 @@ class DeadlineAwareRouter:
     @ray.method(num_return_vals=0)
     def add_replica_fast(self, 
         actor_name, 
-        actor_handle,
+        actor_replica_name,
         resource_bundle_id
         ):
+        print(f"adding replica fast: {actor_name}, {resource_bundle_id}")
         idx = len(self.actor_handles[actor_name])
+        actor_handle = ray.experimental.named_actors.get_actor(actor_replica_name)
         self.actor_handles[actor_name].append(actor_handle)
         self.resource_id_to_actors[resource_bundle_id] = (actor_name, idx)
 
@@ -233,6 +235,7 @@ class DeadlineAwareRouter:
                 batch = self._get_next_batch(actor_name)
                 assert len(batch) == 1, len(batch)
 
+                print(actor_name, actor_handle)
                 actor_handle._dispatch.remote(batch)
                 result_oid = ray.ObjectID.from_binary(batch[0]["result_object_id"])
                 self._mark_running(result_oid, actor_handle)
