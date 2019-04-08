@@ -158,7 +158,9 @@ class DeadlineAwareRouter:
         actor_found = self.actor_handles[actor_name].pop(idx)
         del actor_found
         
-
+    def get_queue_length(self, model_name):
+        return len(self.query_queues[model_name])
+        
     @ray.method(num_return_vals=0)
     def call(self, actor_name, data, result_object_id, deadline_s, req_id, send_time):
         """Enqueue a request to one of the actor managed by this router.
