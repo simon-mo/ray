@@ -31,10 +31,14 @@ class SingleQuery:
         deadline: The deadline in seconds.
     """
 
-    def __init__(self, data, result_object_id: ray.ObjectID, deadline_s: float):
+    def __init__(self, data, result_object_id: ray.ObjectID, deadline_s: float,
+                req_id, send_time
+        ):
         self.data = data
         self.result_object_id = result_object_id
         self.deadline = deadline_s
+        self.req_id = req_id
+        self.send_time = send_time
 
     def __lt__(self, other):
         return self.deadline < other.deadline
@@ -156,7 +160,7 @@ class DeadlineAwareRouter:
         
 
     @ray.method(num_return_vals=0)
-    def call(self, actor_name, data, result_object_id, deadline_s):
+    def call(self, actor_name, data, result_object_id, deadline_s, req_id, send_time):
         """Enqueue a request to one of the actor managed by this router.
 
         Returns:
@@ -178,7 +182,7 @@ class DeadlineAwareRouter:
         data_object_id = data
 
         self.query_queues[actor_name].push(
-            SingleQuery(data_object_id, result_object_id, deadline_s)
+            SingleQuery(data_object_id, result_object_id, deadline_s, req_id, send_time)
         )
 
     @ray.method(num_return_vals=0)
@@ -219,11 +223,10 @@ class DeadlineAwareRouter:
                 actor_handle._dispatch.remote(batch)
                 result_oid = ray.ObjectID.from_binary(batch[0]["result_object_id"])
                 self._mark_running(result_oid, actor_handle)
+ 
         # 3. Tail recursively schedule itself.
         self.handle.loop.remote()
 
-        if self.debug:
-            time.sleep(0.5)
 
     def _get_next_batch(self, actor_name: str) -> List[dict]:
         """Get next batch of request for the actor whose name is provided."""
@@ -248,6 +251,7 @@ class DeadlineAwareRouter:
 
     def _simplify_single_query(self, q: SingleQuery):
         d = q.__dict__
+        d['dequeue_time'] = time.time()
         return d
 
     def _mark_running(

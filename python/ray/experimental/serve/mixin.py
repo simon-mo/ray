@@ -73,5 +73,9 @@ class RayServeMixin:
                 # We are in this case only
                 result = _execute_and_seal_error(method, data, self.serve_method)
                 if self.put_timing_data_instead:
-                    result = time.time()
+                    inp['done_time'] = time.time()
+                inp.pop('data')
+                inp.pop('result_object_id')
+                inp.pop('deadline')
+                result = inp
                 ray.worker.global_worker.put_object(result_object_id, result)
