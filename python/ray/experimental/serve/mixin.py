@@ -49,6 +49,9 @@ class RayServeMixin:
     serve_method = "__call__"
     put_timing_data_instead = False
 
+    def is_ready(self):
+        return True
+
     @ray.method(num_return_vals=0)
     def _dispatch(self, input_batch: List[SingleQuery]):
         """Helper method to dispatch a batch of input to self.serve_method."""

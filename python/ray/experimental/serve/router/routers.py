@@ -148,8 +148,16 @@ class DeadlineAwareRouter:
             resources=resource_vector
         )
 
-        idx = len(self.actor_handles)
-        self.actor_handles[actor_name].append(new_actor_handle)
+        self.add_replica_fast(actor_name, new_actor_handle, resource_bundle_id)
+
+    @ray.method(num_return_vals=0)
+    def add_replica_fast(self, 
+        actor_name, 
+        actor_handle,
+        resource_bundle_id
+        ):
+        idx = len(self.actor_handles[actor_name])
+        self.actor_handles[actor_name].append(actor_handle)
         self.resource_id_to_actors[resource_bundle_id] = (actor_name, idx)
 
     @ray.method(num_return_vals=0)
@@ -158,9 +166,12 @@ class DeadlineAwareRouter:
         actor_found = self.actor_handles[actor_name].pop(idx)
         del actor_found
         
-    def get_queue_length(self, model_name):
-        return len(self.query_queues[model_name])
-        
+    def get_metric(self, model_name):
+        return {
+            'q_len': len(self.query_queues[model_name]),
+            'num_replicas': len(self.actor_handles[model_name])
+        }
+
     @ray.method(num_return_vals=0)
     def call(self, actor_name, data, result_object_id, deadline_s, req_id, send_time):
         """Enqueue a request to one of the actor managed by this router.
