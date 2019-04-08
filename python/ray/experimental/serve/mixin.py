@@ -61,11 +61,7 @@ class RayServeMixin:
 
         assert len(input_batch) == 1, "Assuming batchsize 1"
         inp = input_batch[0]
-        print("MODEL_ACTOR: Get Input")
-        sys.stdout.flush()
         data = ray.get(ray.ObjectID.from_binary(inp["data"]))
-        print("MODEL_ACTOR: Get Input Done")
-        sys.stdout.flush()
         result_object_id = ray.ObjectID.from_binary(inp["result_object_id"])
 
         if is_batched:

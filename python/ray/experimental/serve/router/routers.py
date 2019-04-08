@@ -68,6 +68,7 @@ class DeadlineAwareRouter:
 
         # map resource_bundle_id -> (actor_name: str, idx_in_lst: int)
         self.resource_id_to_actors: Dict[int, tuple] = {}
+        self.warmup_actors: Dict[int, Tuple[ray.actor.ActorHandle, str]] = {}
 
         # Router Metadata
         self.name = router_name
@@ -128,7 +129,7 @@ class DeadlineAwareRouter:
     #             del self.actor_handles[actor_name][-1]
     
     @ray.method(num_return_vals=0)
-    def add_replica(self, 
+    def add_replica_warmup(self, 
         actor_name, 
         num_cpus,
         resource_vector, 
@@ -148,25 +149,21 @@ class DeadlineAwareRouter:
             resources=resource_vector
         )
 
-        self.add_replica_fast(actor_name, new_actor_handle, resource_bundle_id)
+        self.warmup_actors[resource_bundle_id] = (new_actor_handle, actor_name)
 
     @ray.method(num_return_vals=0)
-    def add_replica_fast(self, 
-        actor_name, 
-        actor_replica_name,
-        resource_bundle_id
-        ):
-        print(f"adding replica fast: {actor_name}, {resource_bundle_id}")
-        idx = len(self.actor_handles[actor_name])
-        actor_handle = ray.experimental.named_actors.get_actor(actor_replica_name)
-        self.actor_handles[actor_name].append(actor_handle)
-        self.resource_id_to_actors[resource_bundle_id] = (actor_name, idx)
+    def add_replicas_ready(self, bundle_ids):
+        for bundle_id in bundle_ids:
+            new_actor_handle, actor_name = self.warmup_actors.pop(bundle_id)
+            self.resource_id_to_actors[bundle_id] = (actor_name, new_actor_handle)
+            self.actor_handles[actor_name].append(new_actor_handle)
+        
 
     @ray.method(num_return_vals=0)
     def remove_replica(self, resource_bundle_id):
-        actor_name, idx = self.resource_id_to_actors.pop(resource_bundle_id)
-        actor_found = self.actor_handles[actor_name].pop(idx)
-        del actor_found
+        actor_name, actor_handle = self.resource_id_to_actors.pop(resource_bundle_id)
+        self.actor_handles[actor_name].remove(actor_handle)
+        del actor_handle
         
     def get_metric(self, model_name):
         return {
@@ -235,7 +232,6 @@ class DeadlineAwareRouter:
                 batch = self._get_next_batch(actor_name)
                 assert len(batch) == 1, len(batch)
 
-                print(actor_name, actor_handle)
                 actor_handle._dispatch.remote(batch)
                 result_oid = ray.ObjectID.from_binary(batch[0]["result_object_id"])
                 self._mark_running(result_oid, actor_handle)
