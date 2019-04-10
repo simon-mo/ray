@@ -6,6 +6,7 @@ from collections import defaultdict
 from functools import total_ordering
 from typing import Callable, Dict, List, Set, Tuple
 import time
+from random import random
 
 import ray
 from ray.experimental.serve.object_id import get_new_oid
@@ -74,6 +75,11 @@ class DeadlineAwareRouter:
         self.name = router_name
         self.handle = None
         self.debug = debug
+
+        # Fractional actor
+        self.fractional_actor_handle = None
+        self.fractional_actor_frac = None
+        self.fractional_actor_sleep = None
 
     @ray.method(num_return_vals=0)
     def start(self):
@@ -157,8 +163,13 @@ class DeadlineAwareRouter:
             new_actor_handle, actor_name = self.warmup_actors.pop(bundle_id)
             self.resource_id_to_actors[bundle_id] = (actor_name, new_actor_handle)
             self.actor_handles[actor_name].append(new_actor_handle)
+    
+    @ray.method(num_return_vals=0)
+    def mark_replica_fractional(self, bundle_id, frac, sleep_time):
+        self.fractional_actor_handle = self.resource_id_to_actors[bundle_id][1]
+        self.fractional_actor_frac = frac
+        self.fractional_actor_sleep = sleep_time
         
-
     @ray.method(num_return_vals=0)
     def remove_replica(self, resource_bundle_id):
         actor_name, actor_handle = self.resource_id_to_actors.pop(resource_bundle_id)
@@ -166,9 +177,12 @@ class DeadlineAwareRouter:
         del actor_handle
         
     def get_metric(self, model_name):
+        num_replicas = len(self.actor_handles[model_name])
+        if self.fractional_actor_handle:
+            num_replicas -= (1- self.fractional_actor_frac)
         return {
             'q_len': len(self.query_queues[model_name]),
-            'num_replicas': len(self.actor_handles[model_name])
+            'num_replicas': num_replicas
         }
 
     @ray.method(num_return_vals=0)
@@ -227,6 +241,11 @@ class DeadlineAwareRouter:
                 if len(queue) == 0:
                     break
                 if actor_handle in busy_actors:
+                    continue
+
+                if actor_handle == self.fractional_actor_handle and random() < self.fractional_actor_frac:
+                    result_oid = actor_handle._sleep.remote(self.fractional_actor_sleep)
+                    self._mark_running(result_oid, actor_handle)
                     continue
 
                 batch = self._get_next_batch(actor_name)
