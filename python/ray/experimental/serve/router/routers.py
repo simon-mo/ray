@@ -243,7 +243,7 @@ class DeadlineAwareRouter:
                 if actor_handle in busy_actors:
                     continue
 
-                if actor_handle == self.fractional_actor_handle and random() < self.fractional_actor_frac:
+                if actor_handle == self.fractional_actor_handle and random() > self.fractional_actor_frac:
                     result_oid = actor_handle._sleep.remote(self.fractional_actor_sleep)
                     self._mark_running(result_oid, actor_handle)
                     continue
