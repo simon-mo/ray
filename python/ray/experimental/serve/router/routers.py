@@ -157,6 +157,9 @@ class DeadlineAwareRouter:
 
         self.warmup_actors[resource_bundle_id] = (new_actor_handle, actor_name)
 
+    def add_replicas_ready_blocking(self, bundle_ids):
+        self.add_replicas_ready(bundle_ids)
+
     @ray.method(num_return_vals=0)
     def add_replicas_ready(self, bundle_ids):
         for bundle_id in bundle_ids:
