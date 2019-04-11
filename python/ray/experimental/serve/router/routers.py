@@ -148,7 +148,6 @@ class DeadlineAwareRouter:
         if init_kwargs == None: 
             init_kwargs = dict()
         
-        print(f"Adding a replica for actor {actor_name}, {resource_bundle_id}")
         new_actor_handle = self.managed_actors[actor_name]._remote(
             args=init_args, 
             kwargs=init_kwargs,
@@ -157,7 +156,6 @@ class DeadlineAwareRouter:
         )
 
         self.warmup_actors[resource_bundle_id] = (new_actor_handle, actor_name)
-        print(f"Adding a replica for actor {actor_name}, {resource_bundle_id}, done")
 
     def add_replicas_ready_blocking(self, bundle_ids):
         self.add_replicas_ready(bundle_ids)
