@@ -28,7 +28,8 @@ def _execute_and_seal_error(method, arg, method_name):
     """
     try:
         return method(arg)
-    except Exception:
+    except Exception as e:
+        print(e)
         return ray.worker.RayTaskError(method_name, traceback.format_exc())
 
 
@@ -58,6 +59,7 @@ class RayServeMixin:
         """Helper method to dispatch a batch of input to self.serve_method."""
         method = getattr(self, self.serve_method)
         is_batched = hasattr(method, "ray_serve_batched_input")
+        assert not is_batched
 
         if self.put_timing_data_instead:
             assert not is_batched, "Put timing data assumes single input"
