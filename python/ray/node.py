@@ -383,7 +383,8 @@ class Node(object):
             object_store_memory=self._ray_params.object_store_memory,
             plasma_directory=self._ray_params.plasma_directory,
             huge_pages=self._ray_params.huge_pages,
-            plasma_store_socket_name=self._plasma_store_socket_name)
+            plasma_store_socket_name=self._plasma_store_socket_name,
+            plasma_eviction_frac=self._ray_params.plasma_eviction_frac)
         assert (
             ray_constants.PROCESS_TYPE_PLASMA_STORE not in self.all_processes)
         self.all_processes[ray_constants.PROCESS_TYPE_PLASMA_STORE] = [

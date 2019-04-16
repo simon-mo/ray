@@ -1344,7 +1344,8 @@ def _start_plasma_store(plasma_store_memory,
                         stderr_file=None,
                         plasma_directory=None,
                         huge_pages=False,
-                        socket_name=None):
+                        socket_name=None,
+                        plasma_eviction_frac=0.2):
     """Start a plasma store process.
 
     Args:
@@ -1386,7 +1387,7 @@ def _start_plasma_store(plasma_store_memory,
 
     command = [
         PLASMA_STORE_EXECUTABLE, "-s", socket_name, "-m",
-        str(plasma_store_memory)
+        str(plasma_store_memory), "-f", str(plasma_eviction_frac)
     ]
     if plasma_directory is not None:
         command += ["-d", plasma_directory]
@@ -1407,7 +1408,9 @@ def start_plasma_store(stdout_file=None,
                        object_store_memory=None,
                        plasma_directory=None,
                        huge_pages=False,
-                       plasma_store_socket_name=None):
+                       plasma_store_socket_name=None,
+                       plasma_eviction_frac=0.2
+                       ):
     """This method starts an object store process.
 
     Args:
@@ -1447,7 +1450,8 @@ def start_plasma_store(stdout_file=None,
         stderr_file=stderr_file,
         plasma_directory=plasma_directory,
         huge_pages=huge_pages,
-        socket_name=plasma_store_socket_name)
+        socket_name=plasma_store_socket_name,
+        plasma_eviction_frac=plasma_eviction_frac)
 
     return process_info
 
