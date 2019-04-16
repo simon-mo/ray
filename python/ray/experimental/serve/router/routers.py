@@ -48,7 +48,7 @@ class SingleQuery:
         return self.deadline == other.deadline
 
 
-@ray.remote
+@ray.remote(num_cpus=1, resources={'host':1})
 class DeadlineAwareRouter:
     """DeadlineAwareRouter is a router that is aware of deadlines.
 
