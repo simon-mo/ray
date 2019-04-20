@@ -61,12 +61,17 @@ class RayServeMixin:
         is_batched = hasattr(method, "ray_serve_batched_input")
         assert not is_batched
 
+        begin_ray_get = time.time()
+
         if self.put_timing_data_instead:
             assert not is_batched, "Put timing data assumes single input"
 
         assert len(input_batch) == 1, "Assuming batchsize 1"
         inp = input_batch[0]
+
         data = ray.get(ray.ObjectID.from_binary(inp["data"]))
+        end_ray_get = time.time()
+
         result_object_id = ray.ObjectID.from_binary(inp["result_object_id"])
 
         if is_batched:
@@ -79,7 +84,9 @@ class RayServeMixin:
                 # We are in this case only
                 result = _execute_and_seal_error(method, data, self.serve_method)
                 if self.put_timing_data_instead:
-                    inp['done_time'] = time.time()
+                    inp['model_rcvd'] = begin_ray_get
+                    inp['model_ray_get'] = end_ray_get
+                    inp['model_done'] = time.time()
                 inp.pop('data')
                 inp.pop('result_object_id')
                 inp.pop('deadline')
