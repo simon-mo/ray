@@ -32,9 +32,9 @@ class SingleQuery:
         deadline: The deadline in seconds.
     """
 
-    def __init__(self, data, result_object_id: ray.ObjectID, deadline_s: float,
-                req_id, send_time
-        ):
+    def __init__(
+        self, data, result_object_id: ray.ObjectID, deadline_s: float, req_id, send_time
+    ):
         self.data = data
         self.result_object_id = result_object_id
         self.deadline = deadline_s
@@ -48,7 +48,7 @@ class SingleQuery:
         return self.deadline == other.deadline
 
 
-@ray.remote(num_cpus=1, resources={'host':1})
+@ray.remote(num_cpus=1, resources={"host": 1})
 class DeadlineAwareRouter:
     """DeadlineAwareRouter is a router that is aware of deadlines.
 
@@ -133,59 +133,64 @@ class DeadlineAwareRouter:
     #             # Note actor destructor will be called after all remaining
     #             # calls finish. Therefore it's safe to call del here.
     #             del self.actor_handles[actor_name][-1]
-    
-    @ray.method(num_return_vals=0)
-    def add_replica_warmup(self, 
-        actor_name, 
-        num_cpus,
-        resource_vector, 
-        resource_bundle_id,
-        init_args=None, 
-        init_kwargs=None
-        ):
-        if init_args == None: 
-            init_args = []
-        if init_kwargs == None: 
-            init_kwargs = dict()
-        
-        new_actor_handle = self.managed_actors[actor_name]._remote(
-            args=init_args, 
-            kwargs=init_kwargs,
-            num_cpus=num_cpus,
-            resources=resource_vector
-        )
-
-        self.warmup_actors[resource_bundle_id] = (new_actor_handle, actor_name)
-
-    def add_replicas_ready_blocking(self, bundle_ids):
-        self.add_replicas_ready(bundle_ids)
 
     @ray.method(num_return_vals=0)
-    def add_replicas_ready(self, bundle_ids):
-        for bundle_id in bundle_ids:
-            new_actor_handle, actor_name = self.warmup_actors.pop(bundle_id)
-            self.resource_id_to_actors[bundle_id] = (actor_name, new_actor_handle)
-            self.actor_handles[actor_name].append(new_actor_handle)
-    
+    def add_replica_handle(self, actor_name, actor_handle, bundle_id):
+        self.resource_id_to_actors[bundle_id] = (actor_name, actor_handle)
+        self.actor_handles[actor_name].append(actor_handle)
+
+    # @ray.method(num_return_vals=0)
+    # def add_replica_warmup(self,
+    # actor_name,
+    # num_cpus,
+    # resource_vector,
+    # resource_bundle_id,
+    # init_args=None,
+    # init_kwargs=None
+    # ):
+    # if init_args == None:
+    # init_args = []
+    # if init_kwargs == None:
+    # init_kwargs = dict()
+
+    # new_actor_handle = self.managed_actors[actor_name]._remote(
+    # args=init_args,
+    # kwargs=init_kwargs,
+    # num_cpus=num_cpus,
+    # resources=resource_vector
+    # )
+
+    # self.warmup_actors[resource_bundle_id] = (new_actor_handle, actor_name)
+
+    # def add_replicas_ready_blocking(self, bundle_ids):
+    # self.add_replicas_ready(bundle_ids)
+
+    # @ray.method(num_return_vals=0)
+    # def add_replicas_ready(self, bundle_ids):
+    # for bundle_id in bundle_ids:
+    # new_actor_handle, actor_name = self.warmup_actors.pop(bundle_id)
+    # self.resource_id_to_actors[bundle_id] = (actor_name, new_actor_handle)
+    # self.actor_handles[actor_name].append(new_actor_handle)
+
     @ray.method(num_return_vals=0)
     def mark_replica_fractional(self, bundle_id, frac, sleep_time):
         self.fractional_actor_handle = self.resource_id_to_actors[bundle_id][1]
         self.fractional_actor_frac = frac
         self.fractional_actor_sleep = sleep_time
-        
+
     @ray.method(num_return_vals=0)
     def remove_replica(self, resource_bundle_id):
         actor_name, actor_handle = self.resource_id_to_actors.pop(resource_bundle_id)
         self.actor_handles[actor_name].remove(actor_handle)
         del actor_handle
-        
+
     def get_metric(self, model_name):
         num_replicas = len(self.actor_handles[model_name])
         if self.fractional_actor_handle:
-            num_replicas -= (1- self.fractional_actor_frac)
+            num_replicas -= 1 - self.fractional_actor_frac
         return {
-            'q_len': len(self.query_queues[model_name]),
-            'num_replicas': num_replicas
+            "q_len": len(self.query_queues[model_name]),
+            "num_replicas": num_replicas,
         }
 
     @ray.method(num_return_vals=0)
@@ -246,7 +251,10 @@ class DeadlineAwareRouter:
                 if actor_handle in busy_actors:
                     continue
 
-                if actor_handle == self.fractional_actor_handle and random() > self.fractional_actor_frac:
+                if (
+                    actor_handle == self.fractional_actor_handle
+                    and random() > self.fractional_actor_frac
+                ):
                     result_oid = actor_handle._sleep.remote(self.fractional_actor_sleep)
                     self._mark_running(result_oid, actor_handle)
                     continue
@@ -257,10 +265,9 @@ class DeadlineAwareRouter:
                 actor_handle._dispatch.remote(batch)
                 result_oid = ray.ObjectID.from_binary(batch[0]["result_object_id"])
                 self._mark_running(result_oid, actor_handle)
- 
+
         # 3. Tail recursively schedule itself.
         self.handle.loop.remote()
-
 
     def _get_next_batch(self, actor_name: str) -> List[dict]:
         """Get next batch of request for the actor whose name is provided."""
@@ -285,7 +292,7 @@ class DeadlineAwareRouter:
 
     def _simplify_single_query(self, q: SingleQuery):
         d = q.__dict__
-        d['dequeue_time'] = time.time()
+        d["dequeue_time"] = time.time()
         return d
 
     def _mark_running(
