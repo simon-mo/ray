@@ -137,7 +137,8 @@ class DeadlineAwareRouter:
     @ray.method(num_return_vals=0)
     def add_replica_handle(self, actor_name, actor_handle, bundle_id):
         self.resource_id_to_actors[bundle_id] = (actor_name, actor_handle)
-        self.actor_handles[actor_name].append(actor_handle)
+        # promote new actors to the front of the queue
+        self.actor_handles[actor_name].insert(0, actor_handle)
 
     # @ray.method(num_return_vals=0)
     # def add_replica_warmup(self,
@@ -178,11 +179,13 @@ class DeadlineAwareRouter:
         self.fractional_actor_frac = frac
         self.fractional_actor_sleep = sleep_time
 
-    @ray.method(num_return_vals=0)
+    # this function is called in a blocking maneer
+    # so we can't decorate with num_return_vals=0
     def remove_replica(self, resource_bundle_id):
         actor_name, actor_handle = self.resource_id_to_actors.pop(resource_bundle_id)
         self.actor_handles[actor_name].remove(actor_handle)
-        del actor_handle
+        # del will be handled by controller
+        # del actor_handle
 
     def get_metric(self, model_name):
         num_replicas = len(self.actor_handles[model_name])
