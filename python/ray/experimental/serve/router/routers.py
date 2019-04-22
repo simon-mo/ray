@@ -8,6 +8,8 @@ from typing import Callable, Dict, List, Set, Tuple
 import time
 from random import random
 
+import msgpack
+
 import ray
 from ray.experimental.serve.object_id import get_new_oid
 from ray.experimental.serve.utils.priority_queue import FIFOQueue
@@ -56,9 +58,9 @@ class DeadlineAwareRouter:
     reorder incoming query based on their deadlines.
     """
 
-    def __init__(self, router_name, debug=False):
+    def __init__(self, router_name, load_filename):
         # Runtime Data
-        self.query_queues: Dict[str, PriorityQueue] = defaultdict(FIFOQueue)
+        self.query_queues: Dict[str, FIFOQueue] = defaultdict(FIFOQueue)
         self.running_queries: Dict[ray.ObjectID, ray.actor.ActorHandle] = {}
         self.actor_handles: Dict[str, List[ray.actor.ActorHandle]] = (defaultdict(list))
 
@@ -74,12 +76,17 @@ class DeadlineAwareRouter:
         # Router Metadata
         self.name = router_name
         self.handle = None
-        self.debug = debug
 
         # Fractional actor
         self.fractional_actor_handle = None
         self.fractional_actor_frac = None
         self.fractional_actor_sleep = None
+
+        # Metis specific
+        self.metis_model = None
+        self.metis_load_file_unpacker = msgpack.Unpacker(open(load_filename, "rb"))
+        self.next_load_item = None
+        self.plasma_client = ray.worker.global_worker.plasma_client.orig_obj
 
     @ray.method(num_return_vals=0)
     def start(self):
@@ -91,7 +98,6 @@ class DeadlineAwareRouter:
         self.handle = ray.experimental.get_actor(self.name)
         self.handle.loop.remote()
 
-    @ray.method(num_return_vals=0)
     def register_actor(
         self,
         actor_name: str,
@@ -107,71 +113,13 @@ class DeadlineAwareRouter:
         self.actor_init_arguments[actor_name] = (init_args, init_kwargs)
         self.max_batch_size[actor_name] = max_batch_size
 
-        # ray.experimental.get_actor(self.name).set_replica.remote(
-        #     actor_name, num_replicas
-        # )
-
-    # def set_replica(self, actor_name, new_replica_count):
-    #     """Scale a managed actor according to new_replica_count."""
-    #     assert actor_name in self.managed_actors, ACTOR_NOT_REGISTERED_MSG(actor_name)
-
-    #     current_replicas = len(self.actor_handles[actor_name])
-
-    #     # Increase the number of replicas
-    #     if new_replica_count > current_replicas:
-    #         for _ in range(new_replica_count - current_replicas):
-    #             args = self.actor_init_arguments[actor_name][0]
-    #             kwargs = self.actor_init_arguments[actor_name][1]
-    #             new_actor_handle = self.managed_actors[actor_name].remote(
-    #                 *args, **kwargs
-    #             )
-    #             self.actor_handles[actor_name].append(new_actor_handle)
-
-    #     # Decrease the number of replicas
-    #     if new_replica_count < current_replicas:
-    #         for _ in range(current_replicas - new_replica_count):
-    #             # Note actor destructor will be called after all remaining
-    #             # calls finish. Therefore it's safe to call del here.
-    #             del self.actor_handles[actor_name][-1]
+        self.metis_model = actor_name
 
     @ray.method(num_return_vals=0)
     def add_replica_handle(self, actor_name, actor_handle, bundle_id):
         self.resource_id_to_actors[bundle_id] = (actor_name, actor_handle)
         # promote new actors to the front of the queue
         self.actor_handles[actor_name].insert(0, actor_handle)
-
-    # @ray.method(num_return_vals=0)
-    # def add_replica_warmup(self,
-    # actor_name,
-    # num_cpus,
-    # resource_vector,
-    # resource_bundle_id,
-    # init_args=None,
-    # init_kwargs=None
-    # ):
-    # if init_args == None:
-    # init_args = []
-    # if init_kwargs == None:
-    # init_kwargs = dict()
-
-    # new_actor_handle = self.managed_actors[actor_name]._remote(
-    # args=init_args,
-    # kwargs=init_kwargs,
-    # num_cpus=num_cpus,
-    # resources=resource_vector
-    # )
-
-    # self.warmup_actors[resource_bundle_id] = (new_actor_handle, actor_name)
-
-    # def add_replicas_ready_blocking(self, bundle_ids):
-    # self.add_replicas_ready(bundle_ids)
-
-    # @ray.method(num_return_vals=0)
-    # def add_replicas_ready(self, bundle_ids):
-    # for bundle_id in bundle_ids:
-    # new_actor_handle, actor_name = self.warmup_actors.pop(bundle_id)
-    # self.resource_id_to_actors[bundle_id] = (actor_name, new_actor_handle)
-    # self.actor_handles[actor_name].append(new_actor_handle)
 
     @ray.method(num_return_vals=0)
     def mark_replica_fractional(self, bundle_id, frac, sleep_time):
@@ -196,31 +144,59 @@ class DeadlineAwareRouter:
             "num_replicas": num_replicas,
         }
 
-    @ray.method(num_return_vals=0)
-    def call(self, actor_name, data, result_object_id, deadline_s, req_id, send_time):
-        """Enqueue a request to one of the actor managed by this router.
+    # @ray.method(num_return_vals=0)
+    # def call(self, actor_name, data, result_object_id, deadline_s, req_id, send_time):
+    #     """Enqueue a request to one of the actor managed by this router.
 
-        Returns:
-            List[ray.ObjectID] with length 1, the object ID wrapped inside is
-                the result object ID when the query is executed.
-        """
-        assert actor_name in self.managed_actors, ACTOR_NOT_REGISTERED_MSG(actor_name)
+    #     Returns:
+    #         List[ray.ObjectID] with length 1, the object ID wrapped inside is
+    #             the result object ID when the query is executed.
+    #     """
+    #     assert actor_name in self.managed_actors, ACTOR_NOT_REGISTERED_MSG(actor_name)
 
-        # result_object_id = get_new_oid()
+    #     # result_object_id = get_new_oid()
 
-        # Here, 'data_object_id' is either an ObjectID or an actual object.
-        # When it is an ObjectID, this is an optimization to avoid creating
-        # an extra copy of 'data' in the object store.
-        # data_object_id = ray.worker.global_worker._current_task.arguments()[1]
+    #     # Here, 'data_object_id' is either an ObjectID or an actual object.
+    #     # When it is an ObjectID, this is an optimization to avoid creating
+    #     # an extra copy of 'data' in the object store.
+    #     # data_object_id = ray.worker.global_worker._current_task.arguments()[1]
 
-        for obj in [data, result_object_id]:
-            assert isinstance(obj, bytes), "data is type {}: {}".format(type(obj), obj)
-        # assert isinstance(data, list) and len(data) == 1 and isinstance(data[0], ray.ObjectID)
-        data_object_id = data
+    #     for obj in [data, result_object_id]:
+    #         assert isinstance(obj, bytes), "data is type {}: {}".format(type(obj), obj)
+    #     # assert isinstance(data, list) and len(data) == 1 and isinstance(data[0], ray.ObjectID)
+    #     data_object_id = data
 
-        self.query_queues[actor_name].push(
-            SingleQuery(data_object_id, result_object_id, deadline_s, req_id, send_time)
-        )
+    #     self.query_queues[actor_name].push(
+    #         SingleQuery(data_object_id, result_object_id, deadline_s, req_id, send_time)
+    #     )
+
+    def _check_send_signal_once(self):
+        if self.next_load_item == None:
+            try:
+                self.next_load_item = next(self.metis_load_file_unpacker)
+            except StopIteration:
+                return False
+
+        oid_bytes = self.next_load_item[b"send_signal"]
+        arrow_oid = ray.pyarrow.plasma.ObjectID(oid_bytes)
+        if self.plasma_client.contains(arrow_oid):
+            sg = SingleQuery(
+                self.next_load_item[b"inp"],
+                self.next_load_item[b"out"],
+                1.0,
+                self.next_load_item[b"id"],
+                self.plasma_client.get(arrow_oid),
+            )
+            self.query_queues[self.metis_model].push(sg)
+
+            self.next_load_item = None
+            return True
+        else:
+            return False
+
+    def _check_send_signal(self):
+        while self._check_send_signal_once():
+            pass
 
     @ray.method(num_return_vals=0)
     def loop(self):
@@ -231,6 +207,8 @@ class DeadlineAwareRouter:
            to free actors.
         3. Tail recursively schedule itself.
         """
+        # 0. Receive from query frontend
+        self._check_send_signal()
 
         # 1. Check which running actors finished.
         ready_oids, _ = ray.wait(

@@ -6,7 +6,7 @@ from ray.experimental.serve.router.routers import DeadlineAwareRouter, SingleQue
 import ray
 
 
-def start_router(router_class, router_name):
+def start_router(router_class, router_name, load_filename):
     """Wrapper for starting a router and register it.
 
     Args:
@@ -16,7 +16,7 @@ def start_router(router_class, router_name):
     Returns:
         A handle to newly started router actor.
     """
-    handle = router_class.remote(router_name)
+    handle = router_class.remote(router_name, load_filename)
     ray.experimental.register_actor(router_name, handle)
     handle.start.remote()
     return handle
