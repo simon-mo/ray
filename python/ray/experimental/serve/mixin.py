@@ -69,12 +69,13 @@ class RayServeMixin:
         assert len(input_batch) == 1, "Assuming batchsize 1"
         inp = input_batch[0]
 
-        data = ray.get(ray.ObjectID.from_binary(inp["data"]))
+        inp_id = inp['req_id']
+        # data = ray.get(ray.ObjectID.from_binary(inp["data"]))
         end_ray_get = time.time()
 
         result_object_id = ray.ObjectID.from_binary(inp["result_object_id"])
 
-        result = _execute_and_seal_error(method, data, self.serve_method)
+        result = _execute_and_seal_error(method, inp_id, self.serve_method)
         if self.put_timing_data_instead:
             inp["model_rcvd"] = begin_ray_get
             inp["model_ray_get"] = end_ray_get

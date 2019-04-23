@@ -87,6 +87,7 @@ class DeadlineAwareRouter:
         self.metis_load_file_unpacker = msgpack.Unpacker(open(load_filename, "rb"))
         self.next_load_item = None
         self.plasma_client = ray.worker.global_worker.plasma_client.orig_obj
+        self.total_queries = 0
 
     @ray.method(num_return_vals=0)
     def start(self):
@@ -181,7 +182,7 @@ class DeadlineAwareRouter:
         arrow_oid = ray.pyarrow.plasma.ObjectID(oid_bytes)
         if self.plasma_client.contains(arrow_oid):
             sg = SingleQuery(
-                self.next_load_item[b"inp"],
+                b"", #self.next_load_item[b"inp"],
                 self.next_load_item[b"out"],
                 1.0,
                 self.next_load_item[b"id"],
@@ -195,7 +196,9 @@ class DeadlineAwareRouter:
             return False
 
     def _check_send_signal(self):
-        while self._check_send_signal_once():
+        count = 0
+        while count < 400 and self._check_send_signal_once():
+            count += 1
             pass
 
     @ray.method(num_return_vals=0)
@@ -214,7 +217,7 @@ class DeadlineAwareRouter:
         ready_oids, _ = ray.wait(
             object_ids=list(self.running_queries.keys()),
             num_returns=len(self.running_queries),
-            timeout=0,
+            timeout=0.003, # 3ms
         )
 
         for ready_oid in ready_oids:
