@@ -23,8 +23,6 @@ ACTOR_NOT_REGISTERED_MSG: Callable = (
 )
 
 
-# Use @total_ordering so we can sort SingleQuery
-@total_ordering
 class SingleQuery:
     """A data container for a query.
 
@@ -35,19 +33,19 @@ class SingleQuery:
     """
 
     def __init__(
-        self, data, result_object_id: ray.ObjectID, deadline_s: float, req_id, send_time
+        self, 
+        data, 
+        result_object_id: ray.ObjectID, 
+        *,
+        req_id, 
+        send_time,
+        real_delta
     ):
         self.data = data
         self.result_object_id = result_object_id
-        self.deadline = deadline_s
         self.req_id = req_id
         self.send_time = send_time
-
-    def __lt__(self, other):
-        return self.deadline < other.deadline
-
-    def __eq__(self, other):
-        return self.deadline == other.deadline
+        self.real_delta= real_delta
 
 
 @ray.remote(num_cpus=1, resources={"host": 1})
@@ -181,12 +179,13 @@ class DeadlineAwareRouter:
         oid_bytes = self.next_load_item[b"send_signal"]
         arrow_oid = ray.pyarrow.plasma.ObjectID(oid_bytes)
         if self.plasma_client.contains(arrow_oid):
+            inp = msgpack.unpackb(self.plasma_client.get(arrow_oid))
             sg = SingleQuery(
-                b"", #self.next_load_item[b"inp"],
-                self.next_load_item[b"out"],
-                1.0,
-                self.next_load_item[b"id"],
-                self.plasma_client.get(arrow_oid),
+                data=b"", #we are using redis to get the input data,
+                result_object_id=self.next_load_item[b"out"],
+                req_id=self.next_load_item[b"id"],
+                send_time=inp[b"send_time"],
+                real_delta=inp[b"real_delta"]
             )
             self.query_queues[self.metis_model].push(sg)
 

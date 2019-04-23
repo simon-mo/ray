@@ -80,9 +80,10 @@ class RayServeMixin:
             inp["model_rcvd"] = begin_ray_get
             inp["model_ray_get"] = end_ray_get
             inp["model_done"] = time.time()
+        
         inp.pop("data")
         inp.pop("result_object_id")
-        inp.pop("deadline")
+        
         result = inp
         ray.worker.global_worker.put_object(result_object_id, result)
 
