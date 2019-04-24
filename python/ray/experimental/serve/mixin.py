@@ -63,13 +63,13 @@ class RayServeMixin:
 
         begin_ray_get = time.time()
 
-        if self.put_timing_data_instead:
-            assert not is_batched, "Put timing data assumes single input"
+        # if self.put_timing_data_instead:
+        #     assert not is_batched, "Put timing data assumes single input"
 
         assert len(input_batch) == 1, "Assuming batchsize 1"
         inp = input_batch[0]
 
-        inp_id = inp['req_id']
+        inp_id = inp["req_id"]
         # data = ray.get(ray.ObjectID.from_binary(inp["data"]))
         end_ray_get = time.time()
 
@@ -80,10 +80,10 @@ class RayServeMixin:
             inp["model_rcvd"] = begin_ray_get
             inp["model_ray_get"] = end_ray_get
             inp["model_done"] = time.time()
-        
+
         inp.pop("data")
         inp.pop("result_object_id")
-        
+
         result = inp
         ray.worker.global_worker.put_object(result_object_id, result)
 

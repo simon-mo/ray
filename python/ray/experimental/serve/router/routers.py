@@ -33,19 +33,13 @@ class SingleQuery:
     """
 
     def __init__(
-        self, 
-        data, 
-        result_object_id: ray.ObjectID, 
-        *,
-        req_id, 
-        send_time,
-        real_delta
+        self, data, result_object_id: ray.ObjectID, *, req_id, send_time, real_delta
     ):
         self.data = data
         self.result_object_id = result_object_id
         self.req_id = req_id
         self.send_time = send_time
-        self.real_delta= real_delta
+        self.real_delta = real_delta
 
 
 @ray.remote(num_cpus=1, resources={"host": 1})
@@ -181,11 +175,11 @@ class DeadlineAwareRouter:
         if self.plasma_client.contains(arrow_oid):
             inp = msgpack.unpackb(self.plasma_client.get(arrow_oid))
             sg = SingleQuery(
-                data=b"", #we are using redis to get the input data,
+                data=b"",  # we are using redis to get the input data,
                 result_object_id=self.next_load_item[b"out"],
                 req_id=self.next_load_item[b"id"],
                 send_time=inp[b"send_time"],
-                real_delta=inp[b"real_delta"]
+                real_delta=inp[b"real_delta"],
             )
             self.query_queues[self.metis_model].push(sg)
 
@@ -196,7 +190,7 @@ class DeadlineAwareRouter:
 
     def _check_send_signal(self):
         count = 0
-        while count < 400 and self._check_send_signal_once():
+        while count < 600 and self._check_send_signal_once():
             count += 1
             pass
 
@@ -216,7 +210,7 @@ class DeadlineAwareRouter:
         ready_oids, _ = ray.wait(
             object_ids=list(self.running_queries.keys()),
             num_returns=len(self.running_queries),
-            timeout=0.003, # 3ms
+            timeout=0.003,  # 3ms
         )
 
         for ready_oid in ready_oids:
