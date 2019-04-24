@@ -48,11 +48,13 @@ new_git_repository(
     remote = "https://github.com/google/glog",
 )
 
+
+# Using branch at https://github.com/simon-mo/arrow/tree/custom-eviction-limit
 new_git_repository(
     name = "plasma",
     build_file = "@//bazel:BUILD.plasma",
-    commit = "d00497b38be84fd77c40cbf77f3422f2a81c44f9",
-    remote = "https://github.com/apache/arrow",
+    commit = "2741bdc9dca7299cde20f90bbd5b8eba55a798ea",
+    remote = "https://github.com/simon-mo/arrow",
 )
 
 new_git_repository(

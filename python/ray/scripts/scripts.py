@@ -215,6 +215,12 @@ def cli(logging_level, logging_format):
     is_flag=True,
     default=False,
     help="Specify whether load code from local file or GCS serialization.")
+@click.option(
+    "--plasma-eviction-frac",
+    type=float,
+    default=0.2,
+    help="The fraction of object to be freed in LRU when object store gets full."
+)
 def start(node_ip_address, redis_address, redis_port, num_redis_shards,
           redis_max_clients, redis_password, redis_shard_ports,
           object_manager_port, node_manager_port, object_store_memory,
@@ -222,7 +228,7 @@ def start(node_ip_address, redis_address, redis_port, num_redis_shards,
           block, plasma_directory, huge_pages, autoscaling_config,
           no_redirect_worker_output, no_redirect_output,
           plasma_store_socket_name, raylet_socket_name, temp_dir, include_java,
-          java_worker_options, load_code_from_local, internal_config):
+          java_worker_options, load_code_from_local, internal_config, plasma_eviction_frac):
     # Convert hostnames to numerical IP address.
     if node_ip_address is not None:
         node_ip_address = services.address_to_ip(node_ip_address)
@@ -230,6 +236,7 @@ def start(node_ip_address, redis_address, redis_port, num_redis_shards,
         redis_address = services.address_to_ip(redis_address)
 
     try:
+        resources = resources.strip('"').strip("'")
         resources = json.loads(resources)
     except Exception:
         raise Exception("Unable to parse the --resources argument using "
@@ -258,7 +265,9 @@ def start(node_ip_address, redis_address, redis_port, num_redis_shards,
         include_java=include_java,
         java_worker_options=java_worker_options,
         load_code_from_local=load_code_from_local,
+        plasma_eviction_frac=plasma_eviction_frac,
         _internal_config=internal_config)
+
 
     if head:
         # Start Ray on the head node.

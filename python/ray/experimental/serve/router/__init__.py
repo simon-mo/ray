@@ -2,12 +2,11 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from ray.experimental.serve.router.routers import (DeadlineAwareRouter,
-                                                   SingleQuery)
+from ray.experimental.serve.router.routers import DeadlineAwareRouter, SingleQuery
 import ray
 
 
-def start_router(router_class, router_name):
+def start_router(router_class, router_name, load_filename):
     """Wrapper for starting a router and register it.
 
     Args:
@@ -17,7 +16,7 @@ def start_router(router_class, router_name):
     Returns:
         A handle to newly started router actor.
     """
-    handle = router_class.remote(router_name)
+    handle = router_class.remote(router_name, load_filename)
     ray.experimental.register_actor(router_name, handle)
     handle.start.remote()
     return handle

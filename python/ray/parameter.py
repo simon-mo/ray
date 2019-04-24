@@ -111,7 +111,9 @@ class RayParams(object):
                  include_java=False,
                  java_worker_options=None,
                  load_code_from_local=False,
-                 _internal_config=None):
+                 _internal_config=None,
+                 plasma_eviction_frac=0.2
+                 ):
         self.object_id_seed = object_id_seed
         self.redis_address = redis_address
         self.num_cpus = num_cpus
@@ -144,6 +146,7 @@ class RayParams(object):
         self.java_worker_options = java_worker_options
         self.load_code_from_local = load_code_from_local
         self._internal_config = _internal_config
+        self.plasma_eviction_frac = plasma_eviction_frac
         self._check_usage()
 
     def update(self, **kwargs):
