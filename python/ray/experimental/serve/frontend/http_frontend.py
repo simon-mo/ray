@@ -4,15 +4,17 @@ from __future__ import print_function
 
 import time
 
+from aiohttp import web
+from jsonschema import validate, ValidationError
+
 import ray
-
-
-def unwrap(future):
-    """Unwrap the result from ray.experimental.server router.
-    Router returns a list of object ids when you call them.
-    """
-
-    return ray.get(future)[0]
+from ray.experimental.serve.frontend.util import (
+    async_get,
+    async_unwrap,
+    annotation_to_json_schema,
+    get_base_schema,
+)
+from ray.experimental import async_api
 
 
 @ray.remote
@@ -35,35 +37,58 @@ class HTTPFrontendActor:
         }
     """
 
-    def __init__(self, ip="0.0.0.0", port=8080, router="DefaultRouter"):
+    def __init__(self, ip="0.0.0.0", port=8090, router="DefaultRouter"):
         self.ip = ip
         self.port = port
         self.router = ray.experimental.named_actors.get_actor(router)
 
+        async_api.init()
+
     def start(self):
-        # We have to import flask here to avoid Flask's
-        # "Working outside of request context." error
-        from flask import Flask, request, jsonify  # noqa: E402
+        app = web.Application()
+        routes = web.RouteTableDef()
 
-        default_app = Flask(__name__)
+        @routes.post("/{actor_name:[^{}/]*}")
+        async def hello(request: web.Request):
+            # Make sure model name exists
+            model_name = request.match_info["actor_name"]
+            if len(model_name) == 0:
+                all_actors = ray.get(self.router.get_actors.remote())
+                return web.json_response({"actors": all_actors})
 
-        @default_app.route("/<actor_name>", methods=["GET", "POST"])
-        def dispatch_remote_function(actor_name):
-            data = request.get_json()
+            # Get the annotation
+            try:
+                model_annotation = await async_get(
+                    self.router.get_annotation.remote(model_name)
+                )
+            except ray.worker.RayTaskError as e:
+                return web.Response(text=str(e), status=400)
 
+            data = await request.json()
+
+            # Validate Schema
+            schema = get_base_schema()
+            schema["properties"]["input"]["properties"] = annotation_to_json_schema(
+                model_annotation
+            )
+            print(schema)
+            try:
+                validate(data, schema)
+            except ValidationError as e:
+                return web.Response(text=e.__unicode__(), status=400)
+
+            # Prepare input
+            inp = data.pop("input")
             slo_seconds = data.pop("slo_ms") / 1000
             deadline = time.perf_counter() + slo_seconds
+            result_future = await async_unwrap(
+                self.router.call.remote(model_name, inp, deadline)
+            )
+            result = await async_get(result_future)
 
-            inp = data.pop("input")
+            return web.json_response(
+                {"success": True, "actor": model_name, "result": result}
+            )
 
-            result_future = unwrap(
-                self.router.call.remote(actor_name, inp, deadline))
-            result = ray.get(result_future)
-
-            return jsonify({
-                "success": True,
-                "actor": actor_name,
-                "result": result
-            })
-
-        default_app.run(host=self.ip, port=self.port)
+        app.add_routes(routes)
+        web.run_app(app, host=self.ip, port=self.port)

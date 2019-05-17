@@ -10,7 +10,13 @@ import time
 import numpy as np
 
 import ray
-from ray.experimental.serve import RayServeMixin, batched_input
+from ray.experimental.serve import RayServeMixin, batched_input, RayServable
+
+
+@ray.remote
+class TimesThree(RayServable):
+    def __call__(self, inp: int):
+        return inp * 3
 
 
 @ray.remote

@@ -9,7 +9,7 @@ import requests
 
 import ray
 from ray.experimental.serve import DeadlineAwareRouter
-from ray.experimental.serve.example_actors import VectorizedAdder
+from ray.experimental.serve.example_actors import TimesThree
 from ray.experimental.serve.frontend import HTTPFrontendActor
 from ray.experimental.serve.router import start_router
 
@@ -29,18 +29,23 @@ def get_router():
 def test_http_basic(get_router):
     router = get_router
     a = HTTPFrontendActor.remote(router=ROUTER_NAME)
-    a.start.remote()
+    frontend_crashed = a.start.remote()
 
-    router.register_actor.remote(
-        "VAdder", VectorizedAdder, init_kwargs={"scaler_increment": 1})
+    router.register_actor.remote("TimesThree", TimesThree)
 
     for _ in range(NUMBER_OF_TRIES):
         try:
-            url = "http://0.0.0.0:8080/VAdder"
-            payload = {"input": 10, "slo_ms": 1000}
+            url = "http://0.0.0.0:8090/TimesThree"
+            payload = {"input": {"inp": 3}, "slo_ms": 1000}
             resp = requests.request("POST", url, json=payload)
         except Exception:
             # it is possible that the actor is not yet instantiated
             time.sleep(1)
 
-    assert resp.json() == {"success": True, "actor": "VAdder", "result": 11}
+    print(resp.text)
+    assert resp.json() == {"success": True, "actor": "TimesThree", "result": 9}
+
+    url = "http://0.0.0.0:8090/"
+    resp = requests.request("POST", url)
+    print(resp.text)
+    assert resp.json() == {"actors": ["TimesThree"]}

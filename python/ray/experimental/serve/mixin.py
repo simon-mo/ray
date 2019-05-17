@@ -31,7 +31,10 @@ def _execute_and_seal_error(method, arg, method_name):
     resultOID and retried by user.
     """
     try:
-        return method(arg)
+        if isinstance(arg, dict):
+            return method(**arg)
+        else:
+            return method(arg)
     except Exception:
         return ray.worker.RayTaskError(method_name, traceback.format_exc())
 
@@ -63,7 +66,8 @@ class RayServeMixin:
                 ray.worker.global_worker.put_object(inp.result_object_id, res)
         else:
             for inp in input_batch:
-                result = _execute_and_seal_error(method, inp.data,
-                                                 self.serve_method)
-                ray.worker.global_worker.put_object(inp.result_object_id,
-                                                    result)
+                result = _execute_and_seal_error(method, inp.data, self.serve_method)
+                ray.worker.global_worker.put_object(inp.result_object_id, result)
+
+
+RayServable = RayServeMixin
