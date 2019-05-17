@@ -45,16 +45,37 @@ class HTTPFrontendActor:
         async_api.init()
 
     def start(self):
+        from prometheus_client import Histogram, Counter, Gauge, start_http_server
+
         app = web.Application()
         routes = web.RouteTableDef()
+        metric_hist = Histogram('response_latency_seconds', 'Response latency (seconds)')
+        metric_guage = Gauge('in_progress_requests', 'Requests in progress')
+        metric_counter_rcv = Counter('request_recv', 'Total requests received')
+        metric_counter_done = Counter('request_done', 'Total requests finished')
 
-        @routes.post("/{actor_name:[^{}/]*}")
-        async def hello(request: web.Request):
-            # Make sure model name exists
+        @routes.get("/")
+        async def list_actors(request: web.Request):
+            all_actors = await async_get(self.router.get_actors.remote())
+            return web.json_response({"actors": all_actors})
+
+        @routes.get("/{actor_name}")
+        async def get_schema(request: web.Request):
             model_name = request.match_info["actor_name"]
-            if len(model_name) == 0:
-                all_actors = ray.get(self.router.get_actors.remote())
-                return web.json_response({"actors": all_actors})
+            model_annotation = await async_get(
+                self.router.get_annotation.remote(model_name)
+            )
+            schema = get_base_schema()
+            schema["properties"]["input"]["properties"] = annotation_to_json_schema(
+                model_annotation
+            )
+            return web.json_response(schema)
+
+        @routes.post("/{actor_name}")
+        async def call_actor(request: web.Request):
+            metric_counter_rcv.inc()
+
+            model_name = request.match_info["actor_name"]
 
             # Get the annotation
             try:
@@ -71,7 +92,7 @@ class HTTPFrontendActor:
             schema["properties"]["input"]["properties"] = annotation_to_json_schema(
                 model_annotation
             )
-            print(schema)
+
             try:
                 validate(data, schema)
             except ValidationError as e:
@@ -81,14 +102,23 @@ class HTTPFrontendActor:
             inp = data.pop("input")
             slo_seconds = data.pop("slo_ms") / 1000
             deadline = time.perf_counter() + slo_seconds
-            result_future = await async_unwrap(
-                self.router.call.remote(model_name, inp, deadline)
-            )
-            result = await async_get(result_future)
+            with metric_hist.time():
+                with metric_guage.track_inprogress():
+                    result_future = await async_unwrap(
+                        self.router.call.remote(model_name, inp, deadline)
+                    )
+                    result = await async_get(result_future)
 
+            metric_counter_done.inc()
+
+            if isinstance(result, ray.worker.RayTaskError):
+                return web.json_response(
+                    {"success": False, "actor": model_name, "error": str(result)}
+                )
             return web.json_response(
                 {"success": True, "actor": model_name, "result": result}
             )
 
         app.add_routes(routes)
+        start_http_server(8000)
         web.run_app(app, host=self.ip, port=self.port)
