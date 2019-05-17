@@ -49,7 +49,9 @@ class HTTPFrontendActor:
 
         app = web.Application()
         routes = web.RouteTableDef()
-        metric_hist = Histogram('response_latency_seconds', 'Response latency (seconds)')
+        buckets =  (.005, .01, .025, .05, .075, .1, .25, .5, .75, 1.0, 2.5, 5.0, 7.5, 10.0, 
+                    15.0, 20.0, 25.0, 50.0, 100.0, 150.0, 200.0, float("inf"))
+        metric_hist = Histogram('response_latency_seconds', 'Response latency (seconds)', buckets=buckets)
         metric_guage = Gauge('in_progress_requests', 'Requests in progress')
         metric_counter_rcv = Counter('request_recv', 'Total requests received')
         metric_counter_done = Counter('request_done', 'Total requests finished')
