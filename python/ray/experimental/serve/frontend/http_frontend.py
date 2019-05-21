@@ -15,6 +15,7 @@ from ray.experimental.serve.frontend.util import (
     get_base_schema,
 )
 from ray.experimental import async_api
+import asyncio
 
 
 @ray.remote
@@ -49,12 +50,17 @@ class HTTPFrontendActor:
 
         app = web.Application()
         routes = web.RouteTableDef()
-        buckets =  (.005, .01, .025, .05, .075, .1, .25, .5, .75, 1.0, 2.5, 5.0, 7.5, 10.0, 
-                    15.0, 20.0, 25.0, 50.0, 100.0, 150.0, 200.0, float("inf"))
-        metric_hist = Histogram('response_latency_seconds', 'Response latency (seconds)', buckets=buckets)
+        buckets = (.005, .01, .025, .05, .075, .1, .12, 0.15, 0.18, 0.19, .20,
+                   .21, .22, .23, .23, .24, .25, .26, .27, .3, .4, .5, .75,
+                   1.0, 2.5, 5.0, 7.5, 10.0, 15.0, 20.0, 25.0, 50.0, 100.0,
+                   150.0, 200.0, float("inf"))
+        metric_hist = Histogram('response_latency_seconds',
+                                'Response latency (seconds)',
+                                buckets=buckets)
         metric_guage = Gauge('in_progress_requests', 'Requests in progress')
         metric_counter_rcv = Counter('request_recv', 'Total requests received')
-        metric_counter_done = Counter('request_done', 'Total requests finished')
+        metric_counter_done = Counter('request_done',
+                                      'Total requests finished')
 
         @routes.get("/")
         async def list_actors(request: web.Request):
@@ -65,12 +71,10 @@ class HTTPFrontendActor:
         async def get_schema(request: web.Request):
             model_name = request.match_info["actor_name"]
             model_annotation = await async_get(
-                self.router.get_annotation.remote(model_name)
-            )
+                self.router.get_annotation.remote(model_name))
             schema = get_base_schema()
-            schema["properties"]["input"]["properties"] = annotation_to_json_schema(
-                model_annotation
-            )
+            schema["properties"]["input"][
+                "properties"] = annotation_to_json_schema(model_annotation)
             return web.json_response(schema)
 
         @routes.post("/{actor_name}")
@@ -82,8 +86,7 @@ class HTTPFrontendActor:
             # Get the annotation
             try:
                 model_annotation = await async_get(
-                    self.router.get_annotation.remote(model_name)
-                )
+                    self.router.get_annotation.remote(model_name))
             except ray.worker.RayTaskError as e:
                 return web.Response(text=str(e), status=400)
 
@@ -91,9 +94,8 @@ class HTTPFrontendActor:
 
             # Validate Schema
             schema = get_base_schema()
-            schema["properties"]["input"]["properties"] = annotation_to_json_schema(
-                model_annotation
-            )
+            schema["properties"]["input"][
+                "properties"] = annotation_to_json_schema(model_annotation)
 
             try:
                 validate(data, schema)
@@ -107,20 +109,33 @@ class HTTPFrontendActor:
             with metric_hist.time():
                 with metric_guage.track_inprogress():
                     result_future = await async_unwrap(
-                        self.router.call.remote(model_name, inp, deadline)
-                    )
+                        self.router.call.remote(model_name, inp, deadline))
                     result = await async_get(result_future)
 
             metric_counter_done.inc()
 
             if isinstance(result, ray.worker.RayTaskError):
-                return web.json_response(
-                    {"success": False, "actor": model_name, "error": str(result)}
-                )
-            return web.json_response(
-                {"success": True, "actor": model_name, "result": result}
-            )
+                return web.json_response({
+                    "success": False,
+                    "actor": model_name,
+                    "error": str(result)
+                })
+            return web.json_response({
+                "success": True,
+                "actor": model_name,
+                "result": result
+            })
 
         app.add_routes(routes)
         start_http_server(8000)
+
         web.run_app(app, host=self.ip, port=self.port)
+
+        runner = web.AppRunner(app)
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(runner.setup())
+
+        site = web.TCPSite(runner, self.ip, self.port, backlog=5000)
+
+        loop.run_until_complete(site.start())
+        loop.run_until_complete(runner.cleanup())
