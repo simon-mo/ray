@@ -29,6 +29,8 @@ ObjectManager::ObjectManager(asio::io_service &main_service,
       });
   store_notification_.SubscribeObjDeleted(
       [this](const ObjectID &oid) { NotifyDirectoryObjectDeleted(oid); });
+  // reserve 30million objects, avoid rehashing
+  local_objects_.reserve(30000000);
   StartIOService();
 }
 
