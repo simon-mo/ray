@@ -1,4 +1,5 @@
 import time
+import pickle
 from collections import defaultdict, deque
 
 import requests
@@ -57,6 +58,33 @@ class GlobalState:
 
         #: Metric monitor handle
         self.metric_monitor_handle = None
+
+    # TODO: use ray session dictionary
+    def checkpoint(self, file="/tmp/serve-checkpoint.pkl"):
+        kv_store_state = ray.get(self.kv_store_actor_handle.list_service.remote())
+        registered_backends_state = self.registered_backends
+        registered_endpoints_state = self.registered_endpoints
+
+        traffic_policy = {}
+        for endpoint, stack in self.policy_action_history.items():
+            if len(stack) > 0:
+                traffic_policy[endpoint] = stack[-1]
+
+        backend_creators_state = self.backend_creators
+        backend_replicas_state = self.backend_replicas
+
+        checkpoint_state = {
+            "kv_store": kv_store_state,
+            "backend_names": registered_backends_state,
+            "endpoint_names": registered_endpoints_state,
+            "traffic_policy": traffic_policy,
+            "creators": backend_creators_state,
+            "replica_state": backend_replicas_state
+        }
+
+        with open(file, "wb") as f:
+            pickle.dump(checkpoint_state, f)
+
 
     def init_api_server(self):
         logger.info(LOG_PREFIX + "Initalizing routing table")
