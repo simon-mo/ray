@@ -1,5 +1,7 @@
 import asyncio
 import json
+import time
+import os
 
 import uvicorn
 
@@ -73,6 +75,8 @@ class HTTPProxy:
 
         self.route_checker_should_shutdown = False
 
+        self.profile_file = open(os.environ.get("SERVE_PROFILE_PATH", "/tmp/serve_profile.jsonl"),'w')
+
     async def route_checker(self, interval):
         while True:
             if self.route_checker_should_shutdown:
@@ -138,6 +142,7 @@ class HTTPProxy:
         endpoint_name = self.route_table[current_path]
         http_body_bytes = await self.receive_http_body(scope, receive, send)
 
+        request_sent_time = time.time()
         result_object_id_bytes = await as_future(
             self.router.enqueue_request.remote(
                 service=endpoint_name,
@@ -146,6 +151,11 @@ class HTTPProxy:
                 request_context=TaskContext.Web))
 
         result = await as_future(ray.ObjectID(result_object_id_bytes))
+        result_received_time = time.time()
+        self.profile_file.write(json.dumps({"start": request_sent_time, "end": result_received_time}))
+        self.profile_file.write("\n")
+        self.profile_file.flush()
+
 
         if isinstance(result, ray.exceptions.RayTaskError):
             await JSONResponse({
