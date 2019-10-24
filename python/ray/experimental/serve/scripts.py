@@ -1,4 +1,5 @@
 import json
+import subprocess
 
 import click
 
@@ -14,7 +15,9 @@ def serve_cli():
 @serve_cli.command(help="Initialize ray serve components")
 def init():
     ray.init(address="auto")
-    serve.init(blocking=True)
+
+    script = "import ray.experimental.serve as serve; import time; serve.init(blocking=True); time.sleep(100000)"
+    subprocess.Popen(["python", "-c", script])
 
 
 @serve_cli.command(help="Split traffic for a endpoint")
