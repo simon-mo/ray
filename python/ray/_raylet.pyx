@@ -1500,6 +1500,8 @@ cdef void async_set_result(shared_ptr[CRayObject] obj,
     py_future = <object>(future)
     loop = py_future._loop
 
+    print("Cython async_set_result for object_ref", object_ref.Hex())
+
     # Object is retrieved from in memory store.
     # Here we go through the code path used to deserialize objects.
     objects_to_deserialize.push_back(obj)

@@ -837,6 +837,7 @@ void PlasmaStore::PushNotifications(const std::vector<ObjectInfoT>& object_info)
   if (notification_listener_) {
     for (const auto& info : object_info) {
       if (!info.is_deletion) {
+        RAY_LOG(ERROR) << "PlasmaStore::PushNotifications " << ray::ObjectID::FromBinary(info.object_id).Hex();
         notification_listener_->ProcessStoreAdd(info);
       } else {
         notification_listener_->ProcessStoreRemove(ObjectID::FromBinary(info.object_id));

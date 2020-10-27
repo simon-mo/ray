@@ -2282,13 +2282,17 @@ void CoreWorker::YieldCurrentFiber(FiberEvent &event) {
 void CoreWorker::PlasmaCallback(SetResultCallback success,
                                 std::shared_ptr<RayObject> ray_object, ObjectID object_id,
                                 void *py_future) {
+  RAY_LOG(ERROR) << "Registering PlasmaCallBack for ObjectRef " << object_id;
+  RAY_CHECK(ray_object->IsInPlasmaError() == true);
   std::vector<std::shared_ptr<RayObject>> vec;
   // Check if object is available before subscribing to plasma.
   if (Get(std::vector<ObjectID>{object_id}, 0, &vec).ok() && vec.size() > 0) {
+    RAY_LOG(ERROR) << "> Object available before subscribing to plasma " << object_id;
     return success(vec.front(), object_id, py_future);
   }
   {
     absl::MutexLock lock(&plasma_mutex_);
+    // async_plasma_callbacks_ maps objectrefs -> vec<callback>
     auto it = async_plasma_callbacks_.find(object_id);
     auto plasma_arrived_callback = [this, success, object_id, py_future]() {
       GetAsync(object_id, success, py_future);
@@ -2305,6 +2309,8 @@ void CoreWorker::PlasmaCallback(SetResultCallback success,
 
   // Check in-memory store in case object became ready *before* SubscribeToPlasmaAdd.
   if (Get(std::vector<ObjectID>{object_id}, 0, &vec).ok() && vec.size() > 0) {
+    RAY_LOG(ERROR) << "> Object ready before SubscribeToPlasmaAdd " << object_id;
+
     std::vector<std::function<void(void)>> callbacks;
     {
       absl::MutexLock lock(&plasma_mutex_);
@@ -2327,8 +2333,12 @@ void CoreWorker::GetAsync(const ObjectID &object_id, SetResultCallback success_c
       std::bind(&CoreWorker::PlasmaCallback, this, success_callback,
                 std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
 
+  RAY_LOG(ERROR) << "--GetAsync registered for object_id " << object_id;
+
   memory_store_->GetAsync(object_id, [python_future, success_callback, fallback_callback,
                                       object_id](std::shared_ptr<RayObject> ray_object) {
+    RAY_LOG(ERROR) << "----GetAsyncCallback called with object id " << object_id
+                   << " and the IsInPlasmaError is " << ray_object->IsInPlasmaError();
     if (ray_object->IsInPlasmaError()) {
       fallback_callback(ray_object, object_id, python_future);
     } else {
@@ -2344,11 +2354,15 @@ void CoreWorker::SubscribeToPlasmaAdd(const ObjectID &object_id) {
 void CoreWorker::HandlePlasmaObjectReady(const rpc::PlasmaObjectReadyRequest &request,
                                          rpc::PlasmaObjectReadyReply *reply,
                                          rpc::SendReplyCallback send_reply_callback) {
+  auto oid = ObjectID::FromBinary(request.object_id());
+  RAY_LOG(ERROR) << "!! Got PlasmaObjectReady message for oid " << oid;
   std::vector<std::function<void(void)>> callbacks;
   {
     absl::MutexLock lock(&plasma_mutex_);
     auto it = async_plasma_callbacks_.extract(ObjectID::FromBinary(request.object_id()));
-    callbacks = it.mapped();
+    if (it) {
+      callbacks = it.mapped();
+    }
   }
   for (auto callback : callbacks) {
     // This callback needs to be asynchronous because it runs on the io_service_, so no

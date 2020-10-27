@@ -420,7 +420,13 @@ Status raylet::RayletClient::SubscribeToPlasma(const ObjectID &object_id) {
   flatbuffers::FlatBufferBuilder fbb;
   auto message = protocol::CreateSubscribePlasmaReady(fbb, to_flatbuf(fbb, object_id));
   fbb.Finish(message);
-  return conn_->WriteMessage(MessageType::SubscribePlasmaReady, &fbb);
+  std::vector<uint8_t> reply;
+  RAY_LOG(ERROR) << "Sending SubscribePlasmaReady message for " << object_id;
+  auto status =
+      conn_->AtomicRequestReply(MessageType::SubscribePlasmaReady,
+                                MessageType::SubscribePlasmaReadyReply, &reply, &fbb);
+  RAY_LOG(ERROR) << "Received SubscribePlasmaReadyReply for " << object_id;
+  return status;
 }
 
 }  // namespace ray

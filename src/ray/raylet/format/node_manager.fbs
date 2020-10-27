@@ -82,6 +82,7 @@ enum MessageType:int {
   SetResourceRequest,
   // Subscribe to Plasma updates
   SubscribePlasmaReady,
+  SubscribePlasmaReadyReply,
 }
 
 table TaskExecutionSpecification {
@@ -296,6 +297,9 @@ table SetResourceRequest {
 table SubscribePlasmaReady {
   // ObjectID to wait for
   object_id: string;
+}
+
+table SubscribePlasmaReadyReply {
 }
 
 table ForceSpillObjectsRequest {

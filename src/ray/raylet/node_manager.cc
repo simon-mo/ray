@@ -2957,8 +2957,12 @@ void NodeManager::ProcessSubscribePlasmaReady(
 
   auto message = flatbuffers::GetRoot<protocol::SubscribePlasmaReady>(message_data);
   ObjectID id = from_flatbuf<ObjectID>(*message->object_id());
+  RAY_LOG(ERROR) << "ProcessSubscribePlasmaReady:: Adding " << id
+                 << " to subscriber list ";
+
   {
     absl::MutexLock guard(&plasma_object_notification_lock_);
+
     if (!async_plasma_objects_notification_.contains(id)) {
       async_plasma_objects_notification_.emplace(
           id, absl::flat_hash_set<std::shared_ptr<WorkerInterface>>());
@@ -2969,6 +2973,17 @@ void NodeManager::ProcessSubscribePlasmaReady(
       async_plasma_objects_notification_[id].insert(associated_worker);
     }
   }
+
+  // Write the data.
+  flatbuffers::FlatBufferBuilder fbb;
+  flatbuffers::Offset<protocol::SubscribePlasmaReadyReply> reply =
+      protocol::CreateSubscribePlasmaReadyReply(fbb);
+  fbb.Finish(reply);
+
+  // TODO: make it async?
+  RAY_UNUSED(client->WriteMessage(
+      static_cast<int64_t>(protocol::MessageType::SubscribePlasmaReadyReply),
+      fbb.GetSize(), fbb.GetBufferPointer()));
 }
 
 ray::Status NodeManager::SetupPlasmaSubscription() {
@@ -2976,6 +2991,9 @@ ray::Status NodeManager::SetupPlasmaSubscription() {
       [this](const object_manager::protocol::ObjectInfoT &object_info) {
         ObjectID object_id = ObjectID::FromBinary(object_info.object_id);
         auto waiting_workers = absl::flat_hash_set<std::shared_ptr<WorkerInterface>>();
+
+        RAY_LOG(ERROR) << "Telling " << waiting_workers.size() << " workers that object "
+                       << object_id << " is ready, before lock";
         {
           absl::MutexLock guard(&plasma_object_notification_lock_);
           auto waiting = this->async_plasma_objects_notification_.extract(object_id);
@@ -2983,10 +3001,14 @@ ray::Status NodeManager::SetupPlasmaSubscription() {
             waiting_workers.swap(waiting.mapped());
           }
         }
+
         rpc::PlasmaObjectReadyRequest request;
         request.set_object_id(object_id.Binary());
         request.set_metadata_size(object_info.metadata_size);
         request.set_data_size(object_info.data_size);
+
+        RAY_LOG(ERROR) << "Telling " << waiting_workers.size() << " workers that object "
+                       << object_id << " is ready, after lock";
 
         for (auto worker : waiting_workers) {
           worker->rpc_client()->PlasmaObjectReady(
